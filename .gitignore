@@ -30,3 +30,9 @@ all_migrations.sql
 *.njsproj
 *.sln
 *.sw?
+
+# Large binary files
+bun.lockb
+*.zip
+
+package-lock.json
