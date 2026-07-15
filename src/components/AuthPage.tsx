@@ -30,6 +30,8 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     password: "",
     firstName: "",
     lastName: "",
+    phone: "",
+    loginPhone: "",
     acceptedPolicy: false
   });
   const { toast } = useToast();
@@ -55,6 +57,30 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     });
   };
 
+  // Send WhatsApp welcome message via Evolution API (proxied through Vite to avoid CORS)
+  const sendWhatsAppWelcome = async (phone: string, name: string) => {
+    try {
+      // Normalize phone: remove leading 0 and add 20 (Egypt country code)
+      let normalized = phone.replace(/\s+/g, "").replace(/[^0-9]/g, "");
+      if (normalized.startsWith("0")) normalized = "2" + normalized; // 01x -> 201x
+      if (!normalized.startsWith("20")) normalized = "20" + normalized;
+
+      const message = `مرحباً ${name}! 👋\nتم تسجيل دخولك بنجاح إلى المنصة.\nنتمنى لك تجربة رائعة! 🚀`;
+
+      await fetch("/evo-api/message/sendText/booking-bot", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: "evo-super-secret-api-key-2024",
+        },
+        body: JSON.stringify({ number: normalized, text: message }),
+      });
+    } catch (err) {
+      // WhatsApp is non-critical — silently ignore errors
+      console.warn("WhatsApp notification skipped:", err);
+    }
+  };
+
   const handleSignIn = async () => {
     if (!formData.email || !formData.password) {
       toast({
@@ -67,9 +93,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
 
     setIsLoading(true);
     try {
-      const redirectUrl = `${window.location.origin}/`;
-      
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: formData.email,
         password: formData.password,
       });
@@ -85,6 +109,28 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           title: "Success",
           description: "Signed in successfully!",
         });
+
+        // Fetch profile to get phone & name then send WhatsApp
+        if (data.user) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("phone, first_name")
+            .eq("user_id", data.user.id)
+            .single();
+
+          // Use phone from profile, or fallback to loginPhone field if user typed it
+          const phone = profile?.phone || formData.loginPhone;
+          const name = profile?.first_name || formData.email;
+
+          if (phone) {
+            // Also save phone to profile if it wasn't there
+            if (!profile?.phone && formData.loginPhone) {
+              supabase.from("profiles").update({ phone: formData.loginPhone }).eq("user_id", data.user.id);
+            }
+            sendWhatsAppWelcome(phone, name);
+          }
+        }
+
         onAuthSuccess();
       }
     } catch (error) {
@@ -151,7 +197,7 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
     try {
       const redirectUrl = `${window.location.origin}/`;
       
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email: formData.email,
         password: formData.password,
         options: {
@@ -159,7 +205,8 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           data: {
             first_name: formData.firstName,
             last_name: formData.lastName,
-            accepted_policy: formData.acceptedPolicy
+            accepted_policy: formData.acceptedPolicy,
+            phone: formData.phone,
           }
         }
       });
@@ -171,6 +218,14 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
           variant: "destructive",
         });
       } else {
+        // Save phone to profile if user was created
+        if (data.user && formData.phone) {
+          await supabase
+            .from("profiles")
+            .update({ phone: formData.phone })
+            .eq("user_id", data.user.id);
+        }
+
         toast({
           title: "Success",
           description: "Account created successfully! Please check your email for verification.",
@@ -252,6 +307,19 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
                       type="email"
                       placeholder="Enter your email"
                       value={formData.email}
+                      onChange={handleInputChange}
+                      className="h-11"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="loginPhone">Phone Number (WhatsApp)</Label>
+                    <Input
+                      id="loginPhone"
+                      name="loginPhone"
+                      type="tel"
+                      placeholder="e.g. 01012345678"
+                      value={formData.loginPhone}
                       onChange={handleInputChange}
                       className="h-11"
                     />
@@ -431,6 +499,19 @@ export function AuthPage({ onAuthSuccess }: AuthPageProps) {
                       type="email"
                       placeholder="Enter your email"
                       value={formData.email}
+                      onChange={handleInputChange}
+                      className="h-11"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Phone Number (WhatsApp)</Label>
+                    <Input
+                      id="phone"
+                      name="phone"
+                      type="tel"
+                      placeholder="e.g. 01012345678"
+                      value={formData.phone}
                       onChange={handleInputChange}
                       className="h-11"
                     />
